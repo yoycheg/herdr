@@ -1,0 +1,48 @@
+id = "dsh"
+version = "2026.11.08.1"
+min_engine_version = 2
+updated_at = "2026-11-08T00:00:00Z"
+aliases = ["deepseek-harness", "deepseek harness"]
+
+# DeepSeek Harness draws its whole session in one frame: the bottom status line
+# is the state, and approval cards appear above it while the line still says
+# `working`. The status line is identical in every locale, so the rules read it
+# instead of the transcript.
+
+[[rules]]
+id = "approval_prompt"
+state = "blocked"
+priority = 1000
+region = "bottom_non_empty_lines(20)"
+visible_blocker = true
+contains = ["approval needed"]
+all = [
+  { any = [{ contains = ["y allow once"] }, { contains = ["n reject"] }] },
+]
+
+[[rules]]
+id = "question_prompt"
+state = "blocked"
+priority = 1000
+region = "bottom_non_empty_lines(20)"
+visible_blocker = true
+all = [
+  { any = [{ contains = ["needs your input"] }, { contains = ["waiting for input"] }] },
+  { any = [{ contains = ["enter"] }, { contains = ["esc"] }] },
+]
+
+[[rules]]
+id = "working_status"
+state = "working"
+priority = 500
+region = "bottom_non_empty_lines(3)"
+visible_working = true
+line_regex = ['^\s*▶\s*working\b']
+
+[[rules]]
+id = "idle_ready"
+state = "idle"
+priority = 100
+region = "bottom_non_empty_lines(3)"
+visible_idle = true
+line_regex = ['^\s*●\s*ready\b']

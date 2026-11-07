@@ -65,10 +65,11 @@ pub enum Agent {
     Letta,
     Maki,
     Muse,
+    Dsh,
 }
 
 impl Agent {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 25] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -93,9 +94,10 @@ impl Agent {
         Self::Letta,
         Self::Maki,
         Self::Muse,
+        Self::Dsh,
     ];
 
-    pub const SCREEN_MANIFEST_AGENTS: [Self; 22] = [
+    pub const SCREEN_MANIFEST_AGENTS: [Self; 23] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -118,6 +120,7 @@ impl Agent {
         Self::Letta,
         Self::Maki,
         Self::Muse,
+        Self::Dsh,
     ];
 }
 
@@ -147,6 +150,7 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Letta => "letta",
         Agent::Maki => "maki",
         Agent::Muse => "muse",
+        Agent::Dsh => "dsh",
     }
 }
 
@@ -182,6 +186,7 @@ pub fn interactive_agent_executable(agent: Agent) -> &'static str {
         Agent::Letta => "letta",
         Agent::Maki => "maki",
         Agent::Muse => "muse",
+        Agent::Dsh => "dsh",
     }
 }
 
@@ -222,6 +227,7 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "letta" | "letta-code" | "letta code" => Some(Agent::Letta),
         "maki" => Some(Agent::Maki),
         "muse" | "muse-code" | "muse-cli" => Some(Agent::Muse),
+        "dsh" | "deepseek-harness" | "deepseek harness" => Some(Agent::Dsh),
         _ if is_muse_versioned_binary(name) => Some(Agent::Muse),
         _ => None,
     }
@@ -402,7 +408,7 @@ fn normalized_process_name(process: &crate::platform::ForegroundProcess) -> Stri
             {
                 if matches!(
                     identify_agent(&wrapped_agent),
-                    Some(Agent::Qwen | Agent::Cline | Agent::Letta)
+                    Some(Agent::Qwen | Agent::Cline | Agent::Letta | Agent::Dsh)
                 ) {
                     return wrapped_agent;
                 }
@@ -749,6 +755,10 @@ fn agent_name_from_known_package_path(path: &str) -> Option<String> {
         return Some(agent_label(Agent::Kimi).to_string());
     }
 
+    if ends_with(&["node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"]) {
+        return Some(agent_label(Agent::Dsh).to_string());
+    }
+
     let components: Vec<String> = raw_components
         .into_iter()
         .map(normalized_agent_lookup_name)
@@ -759,6 +769,14 @@ fn agent_name_from_known_package_path(path: &str) -> Option<String> {
         }
     }
     for window in components.windows(4) {
+        // Qwen Code ships cli-entry.js and cli.js outside dist/ as well; the
+        // newer npm layout has no dist/index.js, so node-wrapped panes used to
+        // stay unknown. https://github.com/herdrdev/herdr/issues/3818
+        if window == ["node_modules", "@qwen-code", "qwen-code", "cli-entry"]
+            || window == ["node_modules", "@qwen-code", "qwen-code", "cli"]
+        {
+            return Some(agent_label(Agent::Qwen).to_string());
+        }
         if window == ["node_modules", "mastracode", "dist", "cli"] {
             return Some(agent_label(Agent::Mastracode).to_string());
         }
@@ -1025,6 +1043,8 @@ mod tests {
         assert_eq!(identify_agent("Letta Code"), Some(Agent::Letta));
         assert_eq!(identify_agent("maki"), Some(Agent::Maki));
         assert_eq!(identify_agent("muse"), Some(Agent::Muse));
+        assert_eq!(identify_agent("dsh"), Some(Agent::Dsh));
+        assert_eq!(identify_agent("deepseek-harness"), Some(Agent::Dsh));
         assert_eq!(identify_agent("muse-code"), Some(Agent::Muse));
         assert_eq!(identify_agent("muse-cli"), Some(Agent::Muse));
         assert_eq!(identify_agent("muse-bin-0.1.0-R708.1"), Some(Agent::Muse));
@@ -1110,6 +1130,7 @@ mod tests {
             (Agent::Letta, "letta"),
             (Agent::Maki, "maki"),
             (Agent::Muse, "muse"),
+            (Agent::Dsh, "dsh"),
         ];
         assert_eq!(expected.len(), Agent::ALL.len());
         for (agent, executable) in expected {
@@ -1188,12 +1209,39 @@ mod tests {
     }
 
     #[test]
+    fn identify_agent_in_job_detects_node_wrapped_dsh() {
+        let argv = vec![
+            "node",
+            "/home/user/.nvm/versions/node/v24.14.1/lib/node_modules/@deepseek-ai/dsh/lib/bin.js",
+            "tui",
+        ];
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 123,
+            processes: vec![foreground_process(123, "MainThread", &argv)],
+        };
+
+        assert_eq!(
+            identify_agent_in_job(&job),
+            Some((Agent::Dsh, "dsh".to_string()))
+        );
+    }
+
+    #[test]
     fn identify_agent_in_job_detects_node_wrapped_qwen() {
         for argv in [
             vec!["node", "/home/user/.fnm/bin/qwen"],
             vec![
                 "node.exe",
                 r"C:\Users\user\AppData\Roaming\npm\node_modules\@qwen-code\qwen-code\dist\index.js",
+            ],
+            vec![
+                "node",
+                "/home/user/.nvm/versions/node/v24.14.1/lib/node_modules/@qwen-code/qwen-code/cli-entry.js",
+            ],
+            vec![
+                "node",
+                "--expose-gc",
+                "/home/user/.config/qwen/updates/npm/x/versions/0.27.0/node_modules/@qwen-code/qwen-code/cli.js",
             ],
         ] {
             let job = crate::platform::ForegroundJob {
